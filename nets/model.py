@@ -742,7 +742,7 @@ def g_path_regularize(fake_img, latents, mean_path_length, decay=0.01):
 
 if __name__ == "__main__":
     #for debug  
-    device = torch.device("cuda:7" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     generator = Generator(size=256, style_dim=512, n_mlp=8).to(device)
     discriminator = Discriminator(size=256).to(device)
 
