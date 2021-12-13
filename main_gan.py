@@ -17,9 +17,8 @@ try:
 except ImportError:
     wandb = None
 
-
-#from dataset import MultiResolutionDataset
 from fundus import get_dataset_fundus
+
 from distributed import (
     get_rank,
     synchronize,
@@ -330,11 +329,10 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
 
 if __name__ == "__main__":
-    device = "cuda"
+    device = "cuda:7"
 
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
 
-    parser.add_argument("--path", type=str, help="path to the lmdb dataset")
     parser.add_argument('--arch', type=str, default='stylegan2', help='model architectures (stylegan2 | swagan)')
     parser.add_argument(
         "--iter", type=int, default=800000, help="total training iterations"
@@ -517,7 +515,6 @@ if __name__ == "__main__":
         ]
     )
 
-    #dataset = MultiResolutionDataset(args.path, transform, args.size)
     dataset = get_dataset_fundus()
     loader = data.DataLoader(
         dataset,

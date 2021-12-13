@@ -9,7 +9,12 @@ from torch.nn import functional as F
 from torch.autograd import Function
 from torch import nn, autograd, optim
 from op import FusedLeakyReLU, fused_leaky_relu, upfirdn2d, conv2d_gradfix
+from functools import partial
+import torchvision.models as torchvision_models
+import vits
 
+#https://github.com/rosinality/stylegan2-pytorch
+#https://github.com/facebookresearch/moco-v3
 
 class PixelNorm(nn.Module):
     def __init__(self):
@@ -17,7 +22,6 @@ class PixelNorm(nn.Module):
 
     def forward(self, input):
         return input * torch.rsqrt(torch.mean(input ** 2, dim=1, keepdim=True) + 1e-8)
-
 
 def make_kernel(k):
     k = torch.tensor(k, dtype=torch.float32)
@@ -28,7 +32,6 @@ def make_kernel(k):
     k /= k.sum()
 
     return k
-
 
 class Upsample(nn.Module):
     def __init__(self, kernel, factor=2):
@@ -50,7 +53,6 @@ class Upsample(nn.Module):
 
         return out
 
-
 class Downsample(nn.Module):
     def __init__(self, kernel, factor=2):
         super().__init__()
@@ -71,7 +73,6 @@ class Downsample(nn.Module):
 
         return out
 
-
 class Blur(nn.Module):
     def __init__(self, kernel, pad, upsample_factor=1):
         super().__init__()
@@ -89,7 +90,6 @@ class Blur(nn.Module):
         out = upfirdn2d(input, self.kernel, pad=self.pad)
 
         return out
-
 
 class EqualConv2d(nn.Module):
     def __init__(
@@ -128,7 +128,6 @@ class EqualConv2d(nn.Module):
             f" {self.weight.shape[2]}, stride={self.stride}, padding={self.padding})"
         )
 
-
 class EqualLinear(nn.Module):
     def __init__(
         self, in_dim, out_dim, bias=True, bias_init=0, lr_mul=1, activation=None
@@ -164,7 +163,6 @@ class EqualLinear(nn.Module):
         return (
             f"{self.__class__.__name__}({self.weight.shape[1]}, {self.weight.shape[0]})"
         )
-
 
 class ModulatedConv2d(nn.Module):
     def __init__(
@@ -301,7 +299,6 @@ class ModulatedConv2d(nn.Module):
 
         return out
 
-
 class NoiseInjection(nn.Module):
     def __init__(self):
         super().__init__()
@@ -315,7 +312,6 @@ class NoiseInjection(nn.Module):
 
         return image + self.weight * noise
 
-
 class ConstantInput(nn.Module):
     def __init__(self, channel, size=4):
         super().__init__()
@@ -327,7 +323,6 @@ class ConstantInput(nn.Module):
         out = self.input.repeat(batch, 1, 1, 1)
 
         return out
-
 
 class StyledConv(nn.Module):
     def __init__(
@@ -386,6 +381,100 @@ class ToRGB(nn.Module):
             out = out + skip
 
         return out
+
+class TransEnc(nn.Module):
+    def __init__(self, dim=256, mlp_dim=4096):
+        """
+        dim: feature dimension (default: 256)
+        mlp_dim: hidden dimension in MLPs (default: 4096)
+        """
+        super(TransEnc, self).__init__()
+
+        base_encoder = partial(vits.__dict__['vit_base'])
+        self.base_encoder = base_encoder(num_classes=mlp_dim)
+        self._build_projector_and_predictor_mlps(dim, mlp_dim)
+
+    def _build_mlp(self, num_layers, input_dim, mlp_dim, output_dim, last_bn=True):
+        mlp = []
+        for l in range(num_layers):
+            dim1 = input_dim if l == 0 else mlp_dim
+            dim2 = output_dim if l == num_layers - 1 else mlp_dim
+
+            mlp.append(nn.Linear(dim1, dim2, bias=False))
+
+            if l < num_layers - 1:
+                mlp.append(nn.BatchNorm1d(dim2))
+                mlp.append(nn.ReLU(inplace=True))
+            elif last_bn:
+                # follow SimCLR's design: https://github.com/google-research/simclr/blob/master/model_util.py#L157
+                # for simplicity, we further removed gamma in BN
+                mlp.append(nn.BatchNorm1d(dim2, affine=False))
+
+        return nn.Sequential(*mlp)
+
+    def _build_projector_and_predictor_mlps(self, dim, mlp_dim):
+
+        hidden_dim = self.base_encoder.head.weight.shape[1]
+        del self.base_encoder.head # remove original fc layer
+
+        # projectors
+        self.base_encoder.head = self._build_mlp(3, hidden_dim, mlp_dim, dim)
+
+        # predictor
+        self.predictor = self._build_mlp(2, dim, mlp_dim, dim)
+    def forward(self, x):
+        """
+        Input: images
+        Output: Latent vectors
+        """
+        # compute features
+        return self.predictor(self.base_encoder(x))
+
+class CNNEnc(nn.Module):
+    def __init__(self, dim=256, mlp_dim=4096):
+        """
+        dim: feature dimension (default: 256)
+        mlp_dim: hidden dimension in MLPs (default: 4096)
+        """
+        super(CNNEnc, self).__init__()
+        base_encoder = partial(torchvision_models.__dict__['resnet50'], zero_init_residual=True)
+        self.base_encoder = base_encoder(num_classes=mlp_dim)
+        self._build_projector_and_predictor_mlps(dim, mlp_dim)
+
+    def _build_mlp(self, num_layers, input_dim, mlp_dim, output_dim, last_bn=True):
+        mlp = []
+        for l in range(num_layers):
+            dim1 = input_dim if l == 0 else mlp_dim
+            dim2 = output_dim if l == num_layers - 1 else mlp_dim
+
+            mlp.append(nn.Linear(dim1, dim2, bias=False))
+
+            if l < num_layers - 1:
+                mlp.append(nn.BatchNorm1d(dim2))
+                mlp.append(nn.ReLU(inplace=True))
+            elif last_bn:
+                # follow SimCLR's design: https://github.com/google-research/simclr/blob/master/model_util.py#L157
+                # for simplicity, we further removed gamma in BN
+                mlp.append(nn.BatchNorm1d(dim2, affine=False))
+
+        return nn.Sequential(*mlp)
+
+    def _build_projector_and_predictor_mlps(self, dim, mlp_dim):
+
+        hidden_dim = self.base_encoder.fc.weight.shape[1]
+        del self.base_encoder.fc # remove original fc layer
+        # projectors
+        self.base_encoder.fc = self._build_mlp(2, hidden_dim, mlp_dim, dim)
+        # predictor
+        self.predictor = self._build_mlp(2, dim, mlp_dim, dim, False)
+
+    def forward(self, x):
+        """
+        Input: images
+        Output: Latent vectors
+        """
+        # compute features
+        return self.predictor(self.base_encoder(x))
 
 
 class Generator(nn.Module):
@@ -536,7 +625,6 @@ class Generator(nn.Module):
 
             else:
                 latent = styles[0]
-
         else:
             if inject_index is None:
                 inject_index = random.randint(1, self.n_latent - 1)
@@ -696,11 +784,11 @@ class Discriminator(nn.Module):
 
         return out
 
-def make_noise(batch, latent_dim, n_noise):
+def make_noise(batch, latent_dim, n_noise, device):
     if n_noise == 1:
-        return torch.randn(batch, latent_dim, device='cuda')
+        return torch.randn(batch, latent_dim, device=device)
 
-    noises = torch.randn(n_noise, batch, latent_dim, device='cuda').unbind(0)
+    noises = torch.randn(n_noise, batch, latent_dim, device=device).unbind(0)
 
     return noises
 
@@ -718,7 +806,6 @@ def d_r1_loss(real_pred, real_img):
     grad_penalty = grad_real.pow(2).reshape(grad_real.shape[0], -1).sum(1).mean()
 
     return grad_penalty
-
 
 def g_nonsaturating_loss(fake_pred):
     loss = F.softplus(-fake_pred).mean()
@@ -743,13 +830,18 @@ def g_path_regularize(fake_img, latents, mean_path_length, decay=0.01):
 if __name__ == "__main__":
     #for debug  
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    x = torch.rand(2, 3, 224, 224).to(device).requires_grad_()
+    transenc = TransEnc(256, 4096).to(device)
+    out_trans = transenc(x)
+    cnnenc = CNNEnc(256, 4096).to(device)
+    out_cnn = cnnenc(x)
+    latent_in = torch.cat((out_trans, out_cnn), dim=-1)
+
     generator = Generator(size=256, style_dim=512, n_mlp=8).to(device)
     discriminator = Discriminator(size=256).to(device)
-
-    noises = make_noise(batch=2, latent_dim=512, n_noise=2)
-    fake_img, out_latent = generator(noises, return_latents=True)
-    real_img = torch.rand(2,3,256,256).to(device).requires_grad_()
+    fake_img, latent_out = generator([latent_in], return_latents=True)
     fake_pred = discriminator(fake_img)
+    #noises = make_noise(batch=2, latent_dim=512, n_noise=2, device=device)
     real_pred = discriminator(real_img)
     d_loss = d_logistic_loss(real_pred, fake_pred)
     print(d_loss)
@@ -757,8 +849,7 @@ if __name__ == "__main__":
     print(r1_loss)
     g_loss = g_nonsaturating_loss(fake_pred)
     print(g_loss)
-    fake_img, latents = generator(noises, return_latents=True)
-    path_loss, mean_path_length, path_lengths = g_path_regularize(fake_img, latents, mean_path_length=0)
+    path_loss, mean_path_length, path_lengths = g_path_regularize(fake_img, latent_out, mean_path_length=0)
     print(path_loss)
 
 
