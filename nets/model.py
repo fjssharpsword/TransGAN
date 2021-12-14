@@ -8,10 +8,11 @@ from torch import nn
 from torch.nn import functional as F
 from torch.autograd import Function
 from torch import nn, autograd, optim
-from op import FusedLeakyReLU, fused_leaky_relu, upfirdn2d, conv2d_gradfix
+from nets.op import FusedLeakyReLU, fused_leaky_relu, upfirdn2d, conv2d_gradfix
 from functools import partial
 import torchvision.models as torchvision_models
-import vits
+from timm.models.vision_transformer import VisionTransformer
+import nets.vits
 
 #https://github.com/rosinality/stylegan2-pytorch
 #https://github.com/facebookresearch/moco-v3
@@ -390,7 +391,7 @@ class TransEnc(nn.Module):
         """
         super(TransEnc, self).__init__()
 
-        base_encoder = partial(vits.__dict__['vit_base'])
+        base_encoder = partial(nets.vits.__dict__['vit_conv_base'], img_size=256)
         self.base_encoder = base_encoder(num_classes=mlp_dim)
         self._build_projector_and_predictor_mlps(dim, mlp_dim)
 
@@ -422,6 +423,7 @@ class TransEnc(nn.Module):
 
         # predictor
         self.predictor = self._build_mlp(2, dim, mlp_dim, dim)
+
     def forward(self, x):
         """
         Input: images
@@ -830,7 +832,7 @@ def g_path_regularize(fake_img, latents, mean_path_length, decay=0.01):
 if __name__ == "__main__":
     #for debug  
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    x = torch.rand(2, 3, 224, 224).to(device).requires_grad_()
+    x = torch.rand(2, 3, 256, 256).to(device).requires_grad_()
     transenc = TransEnc(256, 4096).to(device)
     out_trans = transenc(x)
     cnnenc = CNNEnc(256, 4096).to(device)
@@ -842,10 +844,10 @@ if __name__ == "__main__":
     fake_img, latent_out = generator([latent_in], return_latents=True)
     fake_pred = discriminator(fake_img)
     #noises = make_noise(batch=2, latent_dim=512, n_noise=2, device=device)
-    real_pred = discriminator(real_img)
+    real_pred = discriminator(x)
     d_loss = d_logistic_loss(real_pred, fake_pred)
     print(d_loss)
-    r1_loss = d_r1_loss(real_pred, real_img)
+    r1_loss = d_r1_loss(real_pred, x)
     print(r1_loss)
     g_loss = g_nonsaturating_loss(fake_pred)
     print(g_loss)
