@@ -17,7 +17,7 @@ from nets.model import Generator, Discriminator, TransEnc, CNNEnc
 from nets.distributed import (get_rank,synchronize,reduce_loss_dict,reduce_sum,get_world_size,)
 from nets.op import conv2d_gradfix
 from nets.non_leaking import augment, AdaptiveAugment
-
+from nets.perceptual import VGGPerceptualLoss
 
 def data_sampler(dataset, shuffle, distributed):
     if distributed:
@@ -82,7 +82,7 @@ def set_grad_none(model, targets):
         if n in targets:
             p.grad = None
 
-def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_optim, g_ema, device):
+def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_optim, g_ema, vggptloss, device):
     loader = sample_data(loader)
 
     pbar = range(args.iter)
@@ -146,7 +146,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         fake_pred = discriminator(fake_img)
         real_pred = discriminator(real_img_aug)
         d_loss = d_logistic_loss(real_pred, fake_pred)
+        p_loss = vggptloss(real_img_aug, fake_img) #perceptual loss
 
+        loss_dict["p"] = p_loss
         loss_dict["d"] = d_loss
         loss_dict["real_score"] = real_pred.mean()
         loss_dict["fake_score"] = fake_pred.mean()
@@ -154,7 +156,8 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         discriminator.zero_grad()
         transenc.zero_grad()
         cnnsenc.zero_grad()
-        d_loss.backward()
+        d_loss.backward(retain_graph=True)
+        p_loss.backward()
         d_optim.step()
 
         if args.augment and args.augment_p == 0:
@@ -235,6 +238,7 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
 
         loss_reduced = reduce_loss_dict(loss_dict)
 
+        p_loss_val = loss_reduced["p"].mean().item()
         d_loss_val = loss_reduced["d"].mean().item()
         g_loss_val = loss_reduced["g"].mean().item()
         r1_val = loss_reduced["r1"].mean().item()
@@ -246,13 +250,13 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         if get_rank() == 0:
             pbar.set_description(
                 (
-                    f"d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
+                    f"p: {p_loss_val:.4f}; d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
                     f"path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
                     f"augment: {ada_aug_p:.4f}"
                 )
             )
 
-            if i % 1000 == 0:
+            if (i+1) % 5000 == 0:
                 with torch.no_grad():
                     g_ema.eval()
                     sample, _ = g_ema([sample_z])
@@ -264,7 +268,7 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
                         range=(-1, 1),
                     )
 
-            if i % 10000 == 0:
+            if (i+1) % 50000 == 0:
                 torch.save(
                     {
                         "trans": transenc.state_dict(),
@@ -286,7 +290,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TransGAN trainer")
 
     parser.add_argument('--arch', type=str, default='stylegan2', help='model architectures (stylegan2)')
-    parser.add_argument("--iter", type=int, default=100000, help="total training iterations")#800000
+    parser.add_argument("--iter", type=int, default=200000, help="total training iterations")#800000
     parser.add_argument("--batch", type=int, default=2, help="batch sizes for each gpus")
     parser.add_argument("--n_sample",type=int,default=8, help="number of the samples generated during training",)
     parser.add_argument("--size", type=int, default=256, help="image sizes for the model")
@@ -307,6 +311,7 @@ if __name__ == "__main__":
     parser.add_argument("--ada_target", type=float, default=0.6, help="target augmentation probability for adaptive augmentation",)
     parser.add_argument("--ada_length", type=int, default=500 * 1000, help="target duraing to reach augmentation probability for adaptive augmentation",)
     parser.add_argument("--ada_every", type=int, default=256, help="probability update interval of the adaptive augmentation",)
+    parser.add_argument("--matching_loss", type=str, default='mse', help="type of perceptual loss [mse|smoothl1|l1]",)
 
     args = parser.parse_args()
 
@@ -365,8 +370,10 @@ if __name__ == "__main__":
         sampler=data_sampler(dataset, shuffle=True, distributed=args.distributed),
         drop_last=True,
     )
-
-    train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_optim, g_ema, device)
+    #define perceptual loss
+    vggptloss = VGGPerceptualLoss(matching_loss=args.matching_loss).to(device)
+    #training
+    train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_optim, g_ema, vggptloss, device)
 
     #https://github.com/rosinality/stylegan2-pytorch
     #https://github.com/NVlabs/stylegan2-ada-pytorch
