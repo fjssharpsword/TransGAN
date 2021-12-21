@@ -172,7 +172,7 @@ def perceptual_evaluation():
     device = "cuda:7"
     transenc = TransEnc(256, 256).to(device)
     cnnsenc = CNNEnc(256, 256).to(device)
-    ckpt_path = "/data/pycode/TransGAN/ckpts/149999.pt"
+    ckpt_path = "/data/pycode/TransGAN/ckpts/199999.pt"
     transenc.load_state_dict(torch.load(ckpt_path, map_location={'cuda:0': 'cuda:7'})["trans"], strict=False)
     transenc.eval()
     cnnsenc.load_state_dict(torch.load(ckpt_path, map_location={'cuda:0': 'cuda:7'})["cnns"], strict=False)
@@ -180,8 +180,8 @@ def perceptual_evaluation():
     vggptloss = VGGPerceptualLoss(matching_loss="mse").to(device)
 
     #load dataset
-    train_loader = torch.utils.data.DataLoader(get_train_dataset_fundus(), batch_size=16, shuffle=True,num_workers=0, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(get_test_dataset_fundus(), batch_size=16, shuffle=False, num_workers=0, pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(get_train_dataset_fundus(), batch_size=1, shuffle=True,num_workers=0, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(get_test_dataset_fundus(), batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 
     #retrieval evaluation
     print('********************Build feature for trainset!********************')
@@ -212,6 +212,15 @@ def perceptual_evaluation():
             te_feat = torch.cat((te_feat, var_feat.cpu().data.view(var_feat.shape[0],-1)), 0)
             sys.stdout.write('\r test set process: = {}'.format(batch_idx + 1))
             sys.stdout.flush()
+    print('********************Calculate the maximum and minimum perception loss!********************')
+    max_p_loss, min_p_loss = 0.0, 256*256 
+    with torch.autograd.no_grad():
+        for batch_idx, (trimage, trlabel) in enumerate(train_loader):
+            for batch_idx, (teimage, telabel) in enumerate(train_loader):
+                p_loss = vggptloss(trimage.to(device), teimage.to(device))
+                if p_loss>max_p_loss: max_p_loss = p_loss
+                if p_loss<min_p_loss: min_p_loss = p_loss
+    print("Maximum and Minimmum Perceptions are  {:.4f} and {:.4f}".format(max_p_loss, min_p_loss))
     print('********************Retrieval Performance!********************')
     sim_mat = cosine_similarity(te_feat.numpy(), tr_feat.numpy())
     tr_image = tr_image.to(device)
@@ -227,7 +236,8 @@ def perceptual_evaluation():
             for j in idxs:
                 return_img = tr_image[j]
                 p_loss = vggptloss(query_img, return_img)
-                loss_seq.append(loss_seq)
+                p_loss = (p_loss-min_p_loss)/(max_p_loss-min_p_loss)
+                loss_seq.append(p_loss)
             perc_seq.append(np.mean(loss_seq))
         # average perceptual
         print("Fundus Average Perception@{}={:.4f}".format(topk, np.mean(perc_seq)))
