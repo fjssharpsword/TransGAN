@@ -245,18 +245,18 @@ def perceptual_evaluation():
 
             perc_seq.append(np.mean(loss_seq))
             #calculate NDCG
-            idxs = np.arange(topk)#tuple -> array
-            loss_seq = np.array([loss_seq])
-            pd_loss = loss_seq.transpose(1,0)
-            gt_loss = abs(np.sort(-loss_seq,axis=0)).transpose(1,0)
-            NDCG_avg.append(ndcg_score(gt_loss, pd_loss))
+            #idxs = np.arange(topk)#tuple -> array
+            #loss_seq = np.array([loss_seq])
+            #pd_loss = loss_seq.transpose(1,0)
+            #gt_loss = abs(np.sort(-loss_seq,axis=0)).transpose(1,0)
+            #NDCG_avg.append(ndcg_score(gt_loss, pd_loss))
 
             sys.stdout.write('\r test set process: = {}'.format(i+1))
             sys.stdout.flush()
 
         # average perceptual
         print("Fundus Average Perception@{}={:.4f}".format(topk, np.mean(perc_seq)))
-        print("Fundus Average NDCG@{}={:.4f}".format(topk, np.mean(NDCG_avg)))
+        #print("Fundus Average NDCG@{}={:.4f}".format(topk, np.mean(NDCG_avg)))
 
 if __name__ == "__main__":
 

@@ -133,9 +133,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         #random generate noise as latent in
         #noise = mixing_noise(args.batch, args.latent, args.mixing, device)
         #fake_img, _ = generator(noise)
-        #latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
-        #latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
-        latent_in = transenc(real_img)
+        latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
+        latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+        #latent_in = transenc(real_img)
         fake_img, _ = generator([latent_in])
 
         if args.augment:
@@ -190,9 +190,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         requires_grad(cnnsenc, True)
         #noise = mixing_noise(args.batch, args.latent, args.mixing, device)
         #fake_img, _ = generator(noise)
-        #latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
-        #latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
-        latent_in = transenc(real_img)
+        latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
+        latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+        #latent_in = transenc(real_img)
         fake_img, _ = generator([latent_in])
 
         if args.augment:
@@ -215,9 +215,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
             path_batch_size = max(1, args.batch // args.path_batch_shrink)
             #noise = mixing_noise(path_batch_size, args.latent, args.mixing, device)
             #fake_img, latents = generator(noise, return_latents=True)
-            #latent_in_trans, latent_in_cnn = transenc(real_img), cnnsenc(real_img)
-            #latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
-            latent_in = transenc(real_img)
+            latent_in_trans, latent_in_cnn = transenc(real_img), cnnsenc(real_img)
+            latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+            #latent_in = transenc(real_img)
             fake_img, latents = generator([latent_in], return_latents=True)
 
             path_loss, mean_path_length, path_lengths = g_path_regularize(fake_img, latents, mean_path_length)
