@@ -15,6 +15,7 @@ import nets.lpips as lpips
 from datasets.fundus_idrid_grading import get_train_dataset_fundus, get_test_dataset_fundus
 from nets.model import Generator, Discriminator, TransEnc, CNNEnc
 from nets.perceptual import VGGPerceptualLoss
+from sklearn.metrics import ndcg_score
 
 def retrivel_per():    
     #load model
@@ -140,10 +141,10 @@ def recover_fundus():
             with torch.autograd.enable_grad():
                 latent_in.requires_grad = True
                 optimizer = optim.Adam([latent_in], lr=0.1)
-                pbar = tqdm(range(100000))
+                pbar = tqdm(range(10000))
                 latent_path = []
                 for i in pbar:
-                    t = i / 100000
+                    t = i / 10000
                     lr = get_lr(t, 0.1)
                     optimizer.param_groups[0]["lr"] = lr
             
@@ -212,6 +213,7 @@ def perceptual_evaluation():
             te_feat = torch.cat((te_feat, var_feat.cpu().data.view(var_feat.shape[0],-1)), 0)
             sys.stdout.write('\r test set process: = {}'.format(batch_idx + 1))
             sys.stdout.flush()
+    """
     print('********************Calculate the maximum and minimum perception loss!********************')
     max_p_loss, min_p_loss = 0.0, 256*256 
     with torch.autograd.no_grad():
@@ -221,6 +223,8 @@ def perceptual_evaluation():
                 if p_loss>max_p_loss: max_p_loss = p_loss
                 if p_loss<min_p_loss: min_p_loss = p_loss
     print("Maximum and Minimmum Perceptions are  {:.4f} and {:.4f}".format(max_p_loss, min_p_loss))
+    """
+    # max_p_loss=5.5638, min_p_loss=0.0
     print('********************Retrieval Performance!********************')
     sim_mat = cosine_similarity(te_feat.numpy(), tr_feat.numpy())
     tr_image = tr_image.to(device)
@@ -228,23 +232,35 @@ def perceptual_evaluation():
 
     for topk in [5, 10, 20]:
         # NDCG: lack of ground truth ranking labels
-        perc_seq = []
+        perc_seq, NDCG_avg = [], []
         for i in range(sim_mat.shape[0]):
             idxs, vals = zip(*heapq.nlargest(topk, enumerate(sim_mat[i, :].tolist()), key=lambda x: x[1]))
-            query_img = te_image[i]
+            query_img = te_image[i,:,:,:]
             loss_seq = []
             for j in idxs:
-                return_img = tr_image[j]
-                p_loss = vggptloss(query_img, return_img)
-                p_loss = (p_loss-min_p_loss)/(max_p_loss-min_p_loss)
-                loss_seq.append(p_loss)
+                return_img = tr_image[i,:,:,:]
+                p_loss = vggptloss(query_img.unsqueeze(0), return_img.unsqueeze(0))
+                #p_loss = (p_loss-min_p_loss)/(max_p_loss-min_p_loss)
+                loss_seq.append(p_loss.cpu().data)
+
             perc_seq.append(np.mean(loss_seq))
+            #calculate NDCG
+            idxs = np.arange(topk)#tuple -> array
+            loss_seq = np.array([loss_seq])
+            pd_loss = loss_seq.transpose(1,0)
+            gt_loss = abs(np.sort(-loss_seq,axis=0)).transpose(1,0)
+            NDCG_avg.append(ndcg_score(gt_loss, pd_loss))
+
+            sys.stdout.write('\r test set process: = {}'.format(i+1))
+            sys.stdout.flush()
+
         # average perceptual
         print("Fundus Average Perception@{}={:.4f}".format(topk, np.mean(perc_seq)))
+        print("Fundus Average NDCG@{}={:.4f}".format(topk, np.mean(NDCG_avg)))
 
 if __name__ == "__main__":
 
     #retrivel_per()
-    recover_fundus()
-    #perceptual_evaluation()
+    #recover_fundus()
+    perceptual_evaluation()
     #python proj_fundus.py

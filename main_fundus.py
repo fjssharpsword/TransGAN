@@ -133,8 +133,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         #random generate noise as latent in
         #noise = mixing_noise(args.batch, args.latent, args.mixing, device)
         #fake_img, _ = generator(noise)
-        latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
-        latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+        #latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
+        #latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+        latent_in = transenc(real_img)
         fake_img, _ = generator([latent_in])
 
         if args.augment:
@@ -189,8 +190,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
         requires_grad(cnnsenc, True)
         #noise = mixing_noise(args.batch, args.latent, args.mixing, device)
         #fake_img, _ = generator(noise)
-        latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
-        latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+        #latent_in_trans, latent_in_cnn = transenc(real_img),  cnnsenc(real_img)
+        #latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+        latent_in = transenc(real_img)
         fake_img, _ = generator([latent_in])
 
         if args.augment:
@@ -213,8 +215,9 @@ def train(args, loader, transenc, cnnsenc, generator, discriminator, g_optim, d_
             path_batch_size = max(1, args.batch // args.path_batch_shrink)
             #noise = mixing_noise(path_batch_size, args.latent, args.mixing, device)
             #fake_img, latents = generator(noise, return_latents=True)
-            latent_in_trans, latent_in_cnn = transenc(real_img), cnnsenc(real_img)
-            latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+            #latent_in_trans, latent_in_cnn = transenc(real_img), cnnsenc(real_img)
+            #latent_in = torch.cat((latent_in_trans, latent_in_cnn), dim=-1)
+            latent_in = transenc(real_img)
             fake_img, latents = generator([latent_in], return_latents=True)
 
             path_loss, mean_path_length, path_lengths = g_path_regularize(fake_img, latents, mean_path_length)
@@ -290,11 +293,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TransGAN trainer")
 
     parser.add_argument('--arch', type=str, default='stylegan2', help='model architectures (stylegan2)')
-    parser.add_argument("--iter", type=int, default=200000, help="total training iterations")#800000
+    parser.add_argument("--iter", type=int, default=100000, help="total training iterations")#800000
     parser.add_argument("--batch", type=int, default=2, help="batch sizes for each gpus")
     parser.add_argument("--n_sample",type=int,default=8, help="number of the samples generated during training",)
     parser.add_argument("--size", type=int, default=256, help="image sizes for the model")
-    parser.add_argument("--mlp_dim", type=int, default=256, help="feature dimsions of encoders")
+    parser.add_argument("--mlp_dim", type=int, default=512, help="feature dimsions of encoders")
     parser.add_argument("--r1", type=float, default=10, help="weight of the r1 regularization")
     parser.add_argument("--path_regularize", type=float, default=2, help="weight of the path length regularization",)
     parser.add_argument("--path_batch_shrink", type=int, default=2, help="batch size reducing factor for the path length regularization (reduce memory consumption)",)
